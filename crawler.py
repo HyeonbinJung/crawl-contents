@@ -18,7 +18,7 @@ import subprocess
 from lxml import html
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,41 +41,47 @@ UNIVERSAL_THEMES = [
 ]
 
 def fetch_dcbest_page(page=1):
-    url = f'https://gall.dcinside.com/board/lists/?id=dcbest&page={page}'
+    url = f'https://m.dcinside.com/board/dcbest?page={page}'
     req = urllib.request.Request(url, headers=HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
             content = resp.read().decode('utf-8', errors='ignore')
             tree = html.fromstring(content)
-            rows = tree.xpath('//tr[contains(@class, "ub-content")]')
+            items = tree.xpath('//ul[contains(@class, "gall-detail-lst")]/li')
             posts = []
-            for r in rows:
-                num = ''.join(r.xpath('.//td[contains(@class, "gall_num")]/text()')).strip()
-                if not num.isdigit():
+            for it in items:
+                link = it.xpath('.//a[contains(@class, "lt")]')
+                if not link:
                     continue
-                tit_links = r.xpath('.//td[contains(@class, "gall_tit")]/a[1]')
-                if not tit_links:
+                href = link[0].get('href', '')
+                m = re.search(r'dcbest/(\d+)', href)
+                if not m:
                     continue
-                title = tit_links[0].text_content().strip()
-                href = tit_links[0].get('href', '')
-                if not href.startswith('http'):
-                    href = 'https://gall.dcinside.com' + href
-                recomm = ''.join(r.xpath('.//td[contains(@class, "gall_recommend")]/text()')).strip()
-                views = ''.join(r.xpath('.//td[contains(@class, "gall_count")]/text()')).strip()
-                date = ''.join(r.xpath('.//td[contains(@class, "gall_date")]/text()')).strip()
-                writer = ''.join(r.xpath('.//td[contains(@class, "gall_writer")]//text()')).strip()
-
-                recomm_int = int(recomm) if recomm.isdigit() else 0
-                views_int = int(views) if views.isdigit() else 0
+                post_id = m.group(1)
+                
+                subj = it.xpath('.//span[contains(@class, "subjectin")]')
+                title = subj[0].text_content().strip() if subj else ''
+                
+                views_raw = it.xpath('.//ul[contains(@class, "ginfo")]/li[contains(text(), "조회")]/text()')
+                rec_raw = it.xpath('.//ul[contains(@class, "ginfo")]/li[contains(@class, "up")]//text()')
+                nick_raw = it.xpath('.//li[contains(@class, "list-nick")]//text()')
+                
+                views = int(''.join(re.findall(r'\d+', ''.join(views_raw)))) if views_raw else 0
+                rec = int(''.join(re.findall(r'\d+', ''.join(rec_raw)))) if rec_raw else 0
+                writer = ''.join(nick_raw).strip() if nick_raw else 'ㅇㅇ'
+                
+                has_media = bool(it.xpath('.//div[contains(@class, "thum-img")]')) or '이미지' in ''.join(it.xpath('.//span[contains(@class, "subject-add")]//text()'))
+                
+                desktop_url = f'https://gall.dcinside.com/board/view/?id=dcbest&no={post_id}'
 
                 posts.append({
-                    'id': num,
+                    'id': post_id,
                     'title': title,
-                    'url': href,
-                    'recommend': recomm_int,
-                    'views': views_int,
-                    'date': date,
-                    'writer': writer
+                    'url': desktop_url,
+                    'recommend': rec,
+                    'views': views,
+                    'writer': writer,
+                    'has_media_flag': has_media
                 })
             return posts
     except Exception as e:
@@ -100,7 +106,7 @@ def filter_and_categorize(post):
         clean_title = title
 
     # 3. Check for visual media indicator
-    has_media = bool(re.search(r'\.(jpg|png|gif|jpeg|webp)|짤|움짤|만화', title, re.IGNORECASE))
+    has_media = bool(re.search(r'\.(jpg|png|gif|jpeg|webp)|짤|움짤|만화', title, re.IGNORECASE)) or post.get('has_media_flag', False)
 
     # 4. Categorize by universal humor appeal
     category = 'General Humor & Memes'
@@ -136,8 +142,8 @@ def filter_and_categorize(post):
 def main():
     print(f"Starting DC Inside crawl at {datetime.datetime.now()}...")
     raw_posts = []
-    # Fetch first 3 pages (~150 posts)
-    for p in range(1, 4):
+    # Fetch first 5 pages (~150 posts)
+    for p in range(1, 6):
         items = fetch_dcbest_page(p)
         raw_posts.extend(items)
 
